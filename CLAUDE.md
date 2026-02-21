@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Layout
 
-- `VUMeter.js` — the reusable meter class
-- `VUMeter.css` — base styles
+- `src/vumeter.js` — the reusable meter class
+- `src/vumeter.css` — base styles
 - `demo.css` — demo page styles
 - `index.html` — demo / development harness (served via GitHub Pages)

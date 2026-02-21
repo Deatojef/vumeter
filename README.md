@@ -8,7 +8,7 @@ A reusable vanilla JavaScript class that renders a vintage analog VU meter resem
 
 ## Installation
 
-Copy `vumeter.js` and `vumeter.css` from `www/` into your project, then include them in your HTML:
+Copy `vumeter.js` and `vumeter.css` from `src/` into your project, then include them in your HTML:
 
 ```html
 <link rel="stylesheet" href="vumeter.css">
