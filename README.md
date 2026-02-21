@@ -8,11 +8,11 @@ A reusable vanilla JavaScript class that renders a vintage analog VU meter resem
 
 ## Installation
 
-Copy `VUMeter.js` and `VUMeter.css` from `www/` into your project, then include them in your HTML:
+Copy `vumeter.js` and `vumeter.css` from `www/` into your project, then include them in your HTML:
 
 ```html
-<link rel="stylesheet" href="VUMeter.css">
-<script src="VUMeter.js"></script>
+<link rel="stylesheet" href="vumeter.css">
+<script src="vumeter.js"></script>
 ```
 
 No build step, no dependencies, no frameworks.
@@ -25,12 +25,12 @@ No build step, no dependencies, no frameworks.
 <!DOCTYPE html>
 <html>
 <head>
-  <link rel="stylesheet" href="VUMeter.css">
+  <link rel="stylesheet" href="vumeter.css">
 </head>
 <body>
   <div id="my-meter" style="width: 300px;"></div>
 
-  <script src="VUMeter.js"></script>
+  <script src="vumeter.js"></script>
   <script>
     const meter = new VUMeter(document.getElementById('my-meter'));
     meter.setValue(-12);   // feed a dB value to the meter
