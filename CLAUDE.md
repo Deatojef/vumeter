@@ -13,8 +13,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - The core is a JavaScript class (`VUMeter` or similar) that consumers instantiate and feed dB values into
 - The meter face, needle, scale markings, and housing are rendered with SVG to achieve the analog aesthetic
 - CSS handles styling (bezel, glass effect, coloring)
-- A demo HTML page in `www/` serves as both a development harness and usage example
+- A demo HTML page (`index.html`) at the repo root serves as both a development harness and usage example
 
 ## Repository Layout
 
-- `www/` — all source files (JS class, SVG assets or inline SVG, CSS, demo HTML)
+- `VUMeter.js` — the reusable meter class
+- `VUMeter.css` — base styles
+- `demo.css` — demo page styles
+- `index.html` — demo / development harness (served via GitHub Pages)
