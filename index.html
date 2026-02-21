@@ -11,7 +11,7 @@
 
     <h1>VU Meter</h1>
 
-    <!-- Three meter instances -->
+    <!-- Three VU meter instances -->
     <div class="meter-row">
         <div class="meter-wrap">
             <div id="meter-left"></div>
@@ -49,6 +49,31 @@
 
         <p class="hint" id="hint-text">Drag the slider to set the level on all three meters.</p>
 
+    </div>
+
+    <!-- S-meter section -->
+    <h2 style="margin-top:2em;">S-Meter (ham radio / SDR)</h2>
+    <div class="meter-row">
+        <div class="meter-wrap">
+            <div id="meter-smeter"></div>
+            <span class="meter-label">Signal Strength</span>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <label>Signal Level (dBm)</label>
+            <div class="slider-row">
+                <span class="db-readout" style="min-width:40px; text-align:left;">−121</span>
+                <input type="range" id="sm-slider" min="-121" max="-13" step="0.5" value="-100">
+                <span class="db-readout" id="sm-readout">−100.0 dBm</span>
+            </div>
+        </div>
+        <div class="btn-row">
+            <button id="btn-sm-manual" class="active">Manual</button>
+            <button id="btn-sm-sim">Simulated SDR</button>
+        </div>
+        <p class="hint" id="sm-hint">Drag the slider to set the signal level. Clip threshold is S9+20 (−53 dBm).</p>
     </div>
 
     <script src="VUMeter.js"></script>
@@ -236,6 +261,64 @@
             }
         }
 
+    }());
+
+    // ─── S-meter ─────────────────────────────────────────────────────────────
+    (function () {
+        const meterSm = new VUMeter(document.getElementById('meter-smeter'), {
+            scalePreset:   'smeter',
+            dbMin:         -121,
+            dbMax:         -13,
+            noiseFloor:    -121,
+            clipThreshold: -53,
+            showLight:     true,
+            showPeak:      true,
+            label:         'SIG',
+            brand:         '14.205 MHz',
+        });
+
+        const smSlider  = document.getElementById('sm-slider');
+        const smReadout = document.getElementById('sm-readout');
+        const smHint    = document.getElementById('sm-hint');
+        const btnSmMan  = document.getElementById('btn-sm-manual');
+        const btnSmSim  = document.getElementById('btn-sm-sim');
+
+        let smMode  = 'manual';
+        let smTimer = null;
+        let smLevel = -100;
+
+        smSlider.addEventListener('input', function () {
+            smReadout.textContent = parseFloat(this.value).toFixed(1) + ' dBm';
+            if (smMode === 'manual') meterSm.setValue(parseFloat(this.value));
+        });
+
+        function smSetMode(mode) {
+            smMode = mode;
+            btnSmMan.classList.toggle('active', mode === 'manual');
+            btnSmSim.classList.toggle('active', mode === 'sim');
+
+            if (smTimer) { clearInterval(smTimer); smTimer = null; }
+
+            if (mode === 'manual') {
+                smHint.textContent = 'Drag the slider to set the signal level. Clip threshold is S9+20 (−53 dBm).';
+                meterSm.setValue(parseFloat(smSlider.value));
+            } else {
+                smHint.textContent = 'Simulating SDR signal with slow fading and occasional bursts.';
+                smLevel = -100;
+                smTimer = setInterval(function () {
+                    // Slow random walk with occasional signal burst
+                    smLevel += (Math.random() - 0.49) * 3;
+                    smLevel += (-90 - smLevel) * 0.02;   // drift toward S5 area
+                    if (Math.random() < 0.01) smLevel = -55 + Math.random() * 10; // burst
+                    smLevel = Math.max(-121, Math.min(-13, smLevel));
+                    smReadout.textContent = smLevel.toFixed(1) + ' dBm';
+                    meterSm.setValue(smLevel);
+                }, 50); // 20 Hz
+            }
+        }
+
+        btnSmMan.addEventListener('click', () => smSetMode('manual'));
+        btnSmSim.addEventListener('click', () => smSetMode(smMode === 'sim' ? 'manual' : 'sim'));
     }());
     </script>
 
