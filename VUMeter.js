@@ -15,29 +15,56 @@ class VUMeter {
     // ─── Constants ──────────────────────────────────────────────────────────
 
     static DEFAULTS = {
-        width:        300,
-        height:       200,
-        dbMin:        -20,
-        dbMax:        3,
-        noiseFloor:   -20,   // input dB ≤ noiseFloor → needle rests at left
-        ballistics:   true,
-        attackTime:   300,   // ms
-        releaseTime:  300,   // ms
-        label:        'VU',
-        brand:        'MODEL 300',
-        showLight:    true,
-        onClip:       null,
-        onClipRelease: null,
+        width:           300,
+        height:          200,
+        dbMin:           -20,
+        dbMax:           3,
+        noiseFloor:      -20,   // input dB ≤ noiseFloor → needle rests at left
+        ballistics:      true,
+        attackTime:      300,   // ms
+        releaseTime:     300,   // ms
+        label:           'VU',
+        brand:           'MODEL 300',
+        showLight:       true,
+        onClip:          null,
+        onClipRelease:   null,
+        clipThreshold:   0,     // dB above which clip indicator fires
+        autoRange:       false, // dynamically adapt dbMin/dbMax from data
+        autoRangeWindow: 30,    // seconds of sample history
+        autoRangeMargin: 2,     // dB of padding beyond observed signal edges
+        showPeak:        false, // show blue peak-hold secondary needle
+        peakColor:       '#5599ff',
+        peakAttackTime:  50,    // ms — peak needle rise time
+        peakHoldTime:    2000,  // ms — hold before decay
+        peakDecayTime:   1500,  // ms — decay duration after hold
+        scalePreset:     null,  // null | 'smeter'
     };
 
+    // S-unit definitions (HF, ITU standard, dBm)
+    static SMETER_TICKS = [
+        { db: -121, label: 'S1' },
+        { db: -115, label: 'S2' },
+        { db: -109, label: 'S3' },
+        { db: -103, label: 'S4' },
+        { db:  -97, label: 'S5' },
+        { db:  -91, label: 'S6' },
+        { db:  -85, label: 'S7' },
+        { db:  -79, label: 'S8' },
+        { db:  -73, label: 'S9' },
+        { db:  -63, label: '+10' },
+        { db:  -53, label: '+20' },
+        { db:  -33, label: '+40' },
+        { db:  -13, label: '+60' },
+    ];
+
     // SVG coordinate constants
-    static CX       = 150;   // pivot x
-    static CY       = 175;   // pivot y
-    static ARC_R    = 140;   // outer arc radius
-    static TIP_LEN  = 152;   // needle tip length from pivot
-    static TAIL_LEN = 28;    // counterweight tail length
-    static SWEEP    = 100;   // degrees of total arc sweep
-    static ANGLE_MIN = 220;  // SVG degrees at dbMin position
+    static CX        = 150;   // pivot x
+    static CY        = 175;   // pivot y
+    static ARC_R     = 140;   // outer arc radius
+    static TIP_LEN   = 152;   // needle tip length from pivot
+    static TAIL_LEN  = 28;    // counterweight tail length
+    static SWEEP     = 100;   // degrees of total arc sweep
+    static ANGLE_MIN = 220;   // SVG degrees at dbMin position
 
     // ─── Construction ───────────────────────────────────────────────────────
 
@@ -46,12 +73,29 @@ class VUMeter {
         this._options   = Object.assign({}, VUMeter.DEFAULTS, options);
         this._uid       = 'vu' + Math.random().toString(36).slice(2, 7);
 
+        // Store initial range for resetRange()
+        this._initDbMin = this._options.dbMin;
+        this._initDbMax = this._options.dbMax;
+
         this._targetDb  = this._options.dbMin;
         this._currentDb = this._options.dbMin;
         this._clipping  = false;
         this._paused    = false;
         this._rafId     = null;
         this._lastTime  = null;
+
+        // Auto-range state
+        this._rangeSamples       = [];
+        this._autoRangeTargetMin = this._options.dbMin;
+        this._autoRangeTargetMax = this._options.dbMax;
+        this._lastRebuiltDbMin   = this._options.dbMin;
+        this._lastRebuiltDbMax   = this._options.dbMax;
+
+        // Peak hold state
+        this._peakDb        = this._options.dbMin;
+        this._peakVisualDb  = this._options.dbMin;
+        this._peakHoldUntil = 0;      // 0 = no active hold
+        this._peakDecaying  = false;
 
         // Bound handlers for cleanup
         this._onVisibility = () => {
@@ -67,7 +111,39 @@ class VUMeter {
     // ─── Public API ─────────────────────────────────────────────────────────
 
     setValue(db) {
-        const { dbMin, dbMax, noiseFloor } = this._options;
+        const opts = this._options;
+
+        // Auto-range: track raw dB samples and expand range if needed
+        if (opts.autoRange) {
+            const now    = Date.now();
+            const cutoff = now - opts.autoRangeWindow * 1000;
+
+            this._rangeSamples.push({ db, t: now });
+            this._rangeSamples = this._rangeSamples.filter(s => s.t >= cutoff);
+
+            if (this._rangeSamples.length > 0) {
+                const dbs         = this._rangeSamples.map(s => s.db);
+                const observedMin = Math.min(...dbs);
+                const observedMax = Math.max(...dbs);
+                const newMin      = observedMin - opts.autoRangeMargin;
+                const newMax      = observedMax + opts.autoRangeMargin;
+
+                // Store contraction targets for rate-limited shrink in _animate()
+                this._autoRangeTargetMin = newMin;
+                this._autoRangeTargetMax = newMax;
+
+                // Expansion: immediate — only expand, never contract here
+                let expandMin   = opts.dbMin;
+                let expandMax   = opts.dbMax;
+                let needsExpand = false;
+                if (newMin < opts.dbMin) { expandMin = newMin; needsExpand = true; }
+                if (newMax > opts.dbMax) { expandMax = newMax; needsExpand = true; }
+                if (needsExpand) this.setRange(expandMin, expandMax);
+            }
+        }
+
+        const { dbMin, dbMax, noiseFloor } = opts;
+
         // Map [noiseFloor, dbMax] → [dbMin, dbMax]
         let mapped;
         if (db <= noiseFloor) {
@@ -90,8 +166,32 @@ class VUMeter {
         return this._currentDb;
     }
 
+    setRange(dbMin, dbMax) {
+        this._options.dbMin = dbMin;
+        this._options.dbMax = dbMax;
+        this._targetDb  = Math.max(dbMin, Math.min(dbMax, this._targetDb));
+        this._currentDb = Math.max(dbMin, Math.min(dbMax, this._currentDb));
+        this._rebuildScale();
+        this._lastRebuiltDbMin = dbMin;
+        this._lastRebuiltDbMax = dbMax;
+    }
+
+    resetRange() {
+        this._rangeSamples       = [];
+        this._autoRangeTargetMin = this._initDbMin;
+        this._autoRangeTargetMax = this._initDbMax;
+        this._options.dbMin      = this._initDbMin;
+        this._options.dbMax      = this._initDbMax;
+        this._rebuildScale();
+        this._lastRebuiltDbMin   = this._initDbMin;
+        this._lastRebuiltDbMax   = this._initDbMax;
+    }
+
     setOptions(opts) {
+        const needsRebuild = 'clipThreshold' in opts || 'scalePreset' in opts
+                           || 'label' in opts || 'brand' in opts;
         Object.assign(this._options, opts);
+        if (needsRebuild) this._rebuildScale();
     }
 
     pause() {
@@ -145,8 +245,14 @@ class VUMeter {
         this._buildDefs();
         this._buildHousing();
         this._buildFace();
+
+        // Rebuildable scale group — sits between face and needle layers
+        this._scaleGroup = document.createElementNS(ns, 'g');
+        this._scaleGroup.setAttribute('id', 'vu-scale-' + this._uid);
+        this._svg.appendChild(this._scaleGroup);
         this._buildScale();
         this._buildBranding();
+
         this._buildNeedle();
         this._buildPivot();
         this._buildBezel();
@@ -170,6 +276,15 @@ class VUMeter {
         }
         parent.appendChild(el);
         return el;
+    }
+
+    _rebuildScale() {
+        // Remove all children from scale group
+        while (this._scaleGroup.firstChild) {
+            this._scaleGroup.removeChild(this._scaleGroup.firstChild);
+        }
+        this._buildScale();
+        this._buildBranding();
     }
 
     _buildDefs() {
@@ -248,7 +363,7 @@ class VUMeter {
         });
     }
 
-    // Geometry helpers
+    // ─── Geometry helpers ────────────────────────────────────────────────────
 
     _dbToAngleDeg(db) {
         const { dbMin, dbMax } = this._options;
@@ -273,50 +388,64 @@ class VUMeter {
         return `M ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2}`;
     }
 
+    // ─── Scale building ──────────────────────────────────────────────────────
+
     _buildScale() {
-        const { dbMin, dbMax } = this._options;
-        const R     = VUMeter.ARC_R;
-        const CX    = VUMeter.CX;
-        const CY    = VUMeter.CY;
+        const { dbMin, dbMax, clipThreshold, scalePreset } = this._options;
+        const R = VUMeter.ARC_R;
 
-        // Black arc: dbMin → 0
-        this._el('path', {
-            d:            this._arcPath(dbMin, 0, R),
-            fill:         'none',
-            stroke:       '#1a1a1a',
-            'stroke-width': '1.5',
-            'stroke-linecap': 'round',
-        });
+        // Clamp clip threshold to visible range for arc boundaries
+        const arcClip = Math.max(dbMin, Math.min(dbMax, clipThreshold));
 
-        // Red arc: 0 → dbMax
-        this._el('path', {
-            d:            this._arcPath(0, dbMax, R),
-            fill:         'none',
-            stroke:       '#cc2200',
-            'stroke-width': '2',
-            'stroke-linecap': 'round',
-        });
-
-        // Labeled major tick positions (standard VU scale)
-        const majorTicks = [-20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3];
-        const majorSet   = new Set(majorTicks);
-
-        // All 1-dB minor tick positions
-        const allTicks = [];
-        for (let d = dbMin; d <= dbMax; d++) {
-            allTicks.push(d);
+        // Black arc: dbMin → clipThreshold
+        if (arcClip > dbMin) {
+            this._elIn(this._scaleGroup, 'path', {
+                d:                this._arcPath(dbMin, arcClip, R),
+                fill:             'none',
+                stroke:           '#1a1a1a',
+                'stroke-width':   '1.5',
+                'stroke-linecap': 'round',
+            });
         }
 
-        for (const d of allTicks) {
-            const isMajor   = majorSet.has(d);
-            const isRed     = d > 0;
-            const angleDeg  = this._dbToAngleDeg(d);
-            const r_outer   = R;
-            const r_inner   = isMajor ? R - 25 : R - 15;
-            const outer     = this._angleToXY(angleDeg, r_outer);
-            const inner     = this._angleToXY(angleDeg, r_inner);
+        // Red arc: clipThreshold → dbMax
+        if (arcClip < dbMax) {
+            this._elIn(this._scaleGroup, 'path', {
+                d:                this._arcPath(arcClip, dbMax, R),
+                fill:             'none',
+                stroke:           '#cc2200',
+                'stroke-width':   '2',
+                'stroke-linecap': 'round',
+            });
+        }
 
-            this._el('line', {
+        if (scalePreset === 'smeter') {
+            this._buildSmeterScale();
+        } else {
+            this._buildDefaultScale();
+        }
+    }
+
+    _buildDefaultScale() {
+        const { dbMin, dbMax, clipThreshold } = this._options;
+        const R = VUMeter.ARC_R;
+
+        // Standard VU major tick positions, filtered to visible range
+        const allMajorTicks = [-20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3];
+        const majorTicks    = allMajorTicks.filter(d => d >= dbMin && d <= dbMax);
+        const majorSet      = new Set(majorTicks);
+
+        // 1 dB minor ticks across the whole range
+        const startTick = Math.ceil(dbMin);
+        for (let d = startTick; d <= dbMax; d++) {
+            const isMajor  = majorSet.has(d);
+            const isRed    = d > clipThreshold;
+            const angleDeg = this._dbToAngleDeg(d);
+            const r_inner  = isMajor ? R - 25 : R - 15;
+            const outer    = this._angleToXY(angleDeg, R);
+            const inner    = this._angleToXY(angleDeg, r_inner);
+
+            this._elIn(this._scaleGroup, 'line', {
                 x1: outer.x.toFixed(3), y1: outer.y.toFixed(3),
                 x2: inner.x.toFixed(3), y2: inner.y.toFixed(3),
                 stroke:           isRed ? '#cc2200' : '#1a1a1a',
@@ -330,18 +459,75 @@ class VUMeter {
         for (const d of majorTicks) {
             const angleDeg = this._dbToAngleDeg(d);
             const pos      = this._angleToXY(angleDeg, R_label);
-            const isRed    = d > 0;
+            const isRed    = d > clipThreshold;
             const label    = d > 0 ? `+${d}` : `${d}`;
 
-            const txt = this._el('text', {
-                x:                  pos.x.toFixed(3),
-                y:                  pos.y.toFixed(3),
-                'text-anchor':      'middle',
+            const txt = this._elIn(this._scaleGroup, 'text', {
+                x:                   pos.x.toFixed(3),
+                y:                   pos.y.toFixed(3),
+                'text-anchor':       'middle',
                 'dominant-baseline': 'middle',
-                'font-size':        d === -20 || d === -10 ? '7.5' : '8.5',
-                'font-family':      'Georgia, Times New Roman, serif',
-                fill:               isRed ? '#cc2200' : '#1a1a1a',
-                'font-weight':      d === 0 ? 'bold' : 'normal',
+                'font-size':         d === -20 || d === -10 ? '7.5' : '8.5',
+                'font-family':       'Georgia, Times New Roman, serif',
+                fill:                isRed ? '#cc2200' : '#1a1a1a',
+                'font-weight':       d === 0 ? 'bold' : 'normal',
+            });
+            txt.textContent = label;
+        }
+    }
+
+    _buildSmeterScale() {
+        const { dbMin, dbMax, clipThreshold } = this._options;
+        const R       = VUMeter.ARC_R;
+        const R_label = R - 35;
+
+        // Filter S-unit tick definitions to the visible range
+        const inRange  = VUMeter.SMETER_TICKS.filter(t => t.db >= dbMin && t.db <= dbMax);
+        const majorSet = new Set(inRange.map(t => t.db));
+
+        // 6 dB minor ticks — skip positions that are S-unit major ticks
+        for (let d = dbMin; d <= dbMax; d += 6) {
+            if (majorSet.has(d)) continue;
+            const isRed    = d > clipThreshold;
+            const angleDeg = this._dbToAngleDeg(d);
+            const outer    = this._angleToXY(angleDeg, R);
+            const inner    = this._angleToXY(angleDeg, R - 15);
+
+            this._elIn(this._scaleGroup, 'line', {
+                x1: outer.x.toFixed(3), y1: outer.y.toFixed(3),
+                x2: inner.x.toFixed(3), y2: inner.y.toFixed(3),
+                stroke:           isRed ? '#cc2200' : '#1a1a1a',
+                'stroke-width':   '0.8',
+                'stroke-linecap': 'round',
+            });
+        }
+
+        // Major S-unit ticks and labels
+        for (const { db, label } of inRange) {
+            const isRed    = db > clipThreshold;
+            const angleDeg = this._dbToAngleDeg(db);
+            const outer    = this._angleToXY(angleDeg, R);
+            const inner    = this._angleToXY(angleDeg, R - 25);
+            const pos      = this._angleToXY(angleDeg, R_label);
+
+            this._elIn(this._scaleGroup, 'line', {
+                x1: outer.x.toFixed(3), y1: outer.y.toFixed(3),
+                x2: inner.x.toFixed(3), y2: inner.y.toFixed(3),
+                stroke:           isRed ? '#cc2200' : '#1a1a1a',
+                'stroke-width':   '1.4',
+                'stroke-linecap': 'round',
+            });
+
+            const isPlus = label.startsWith('+');
+            const txt = this._elIn(this._scaleGroup, 'text', {
+                x:                   pos.x.toFixed(3),
+                y:                   pos.y.toFixed(3),
+                'text-anchor':       'middle',
+                'dominant-baseline': 'middle',
+                'font-size':         isPlus ? '7' : '8',
+                'font-family':       'Georgia, Times New Roman, serif',
+                fill:                isRed ? '#cc2200' : '#1a1a1a',
+                'font-weight':       label === 'S9' ? 'bold' : 'normal',
             });
             txt.textContent = label;
         }
@@ -351,28 +537,28 @@ class VUMeter {
         const { label, brand } = this._options;
 
         if (label) {
-            const vu = this._el('text', {
+            const vu = this._elIn(this._scaleGroup, 'text', {
                 x: '150', y: '108',
-                'text-anchor':      'middle',
+                'text-anchor':       'middle',
                 'dominant-baseline': 'middle',
-                'font-size':        '20',
-                'font-family':      'Georgia, Times New Roman, serif',
-                'font-weight':      'bold',
-                fill:               '#1a1a1a',
-                'letter-spacing':   '5',
+                'font-size':         '20',
+                'font-family':       'Georgia, Times New Roman, serif',
+                'font-weight':       'bold',
+                fill:                '#1a1a1a',
+                'letter-spacing':    '5',
             });
             vu.textContent = label;
         }
 
         if (brand) {
-            const br = this._el('text', {
+            const br = this._elIn(this._scaleGroup, 'text', {
                 x: '150', y: '120',
-                'text-anchor':      'middle',
+                'text-anchor':       'middle',
                 'dominant-baseline': 'middle',
-                'font-size':        '6.5',
-                'font-family':      'Arial, Helvetica, sans-serif',
-                fill:               '#666666',
-                'letter-spacing':   '2',
+                'font-size':         '6.5',
+                'font-family':       'Arial, Helvetica, sans-serif',
+                fill:                '#666666',
+                'letter-spacing':    '2',
             });
             br.textContent = brand.toUpperCase();
         }
@@ -397,12 +583,33 @@ class VUMeter {
             rx: '3.5', ry: '2.2',
             fill: '#333333',
         });
-
-        // Rotate counterweight to align with needle angle
         this._counterweight.setAttribute(
             'transform',
             `rotate(${startAngle}, ${tail.x.toFixed(3)}, ${tail.y.toFixed(3)})`
         );
+
+        // Peak hold needle — rendered after main needle so it draws on top
+        if (this._options.showPeak) {
+            const pc = this._options.peakColor;
+
+            this._peakNeedle = this._el('line', {
+                x1: tail.x.toFixed(3), y1: tail.y.toFixed(3),
+                x2: tip.x.toFixed(3),  y2: tip.y.toFixed(3),
+                stroke:           pc,
+                'stroke-width':   '1.0',
+                'stroke-linecap': 'round',
+            });
+
+            this._peakCounterweight = this._el('ellipse', {
+                cx: tail.x.toFixed(3), cy: tail.y.toFixed(3),
+                rx: '3.5', ry: '2.2',
+                fill: pc,
+            });
+            this._peakCounterweight.setAttribute(
+                'transform',
+                `rotate(${startAngle}, ${tail.x.toFixed(3)}, ${tail.y.toFixed(3)})`
+            );
+        }
     }
 
     _buildPivot() {
@@ -502,14 +709,42 @@ class VUMeter {
             this._lastTime = timestamp;
         }
 
-        const dt = Math.min(timestamp - this._lastTime, 100); // cap dt to 100ms
+        const dt = Math.min(timestamp - this._lastTime, 100); // cap dt to 100 ms
         this._lastTime = timestamp;
 
+        // Auto-range contraction: shrink toward observed target at ≤1 dB/s
+        if (this._options.autoRange) {
+            const maxChange = dt / 1000;
+            const prevMin   = this._options.dbMin;
+            const prevMax   = this._options.dbMax;
+
+            if (this._options.dbMin < this._autoRangeTargetMin) {
+                this._options.dbMin = Math.min(
+                    this._options.dbMin + maxChange,
+                    this._autoRangeTargetMin
+                );
+            }
+            if (this._options.dbMax > this._autoRangeTargetMax) {
+                this._options.dbMax = Math.max(
+                    this._options.dbMax - maxChange,
+                    this._autoRangeTargetMax
+                );
+            }
+
+            // Rebuild scale once the range has drifted ≥1 dB from last rebuild
+            if (Math.abs(this._options.dbMin - this._lastRebuiltDbMin) >= 1 ||
+                Math.abs(this._options.dbMax - this._lastRebuiltDbMax) >= 1) {
+                this._rebuildScale();
+                this._lastRebuiltDbMin = this._options.dbMin;
+                this._lastRebuiltDbMax = this._options.dbMax;
+            }
+        }
+
+        // Main needle ballistics
         if (this._options.ballistics) {
             const diff = this._targetDb - this._currentDb;
 
             if (Math.abs(diff) < 0.005) {
-                // Dead-band snap
                 this._currentDb = this._targetDb;
             } else {
                 const tau    = diff > 0 ? this._options.attackTime : this._options.releaseTime;
@@ -527,6 +762,43 @@ class VUMeter {
         this._updateNeedle(this._currentDb);
         this._updateClipState(this._currentDb);
 
+        // Peak hold needle
+        if (this._options.showPeak && this._peakNeedle) {
+            const now = Date.now();
+
+            // Capture new peak immediately
+            if (this._targetDb > this._peakDb) {
+                this._peakDb        = this._targetDb;
+                this._peakHoldUntil = now + this._options.peakHoldTime;
+                this._peakDecaying  = false;
+            }
+
+            // Expire hold period
+            if (!this._peakDecaying && this._peakHoldUntil > 0 && now >= this._peakHoldUntil) {
+                this._peakDecaying = true;
+            }
+
+            if (this._peakDecaying) {
+                // Exponential decay toward dbMin
+                const factor = 1 - Math.exp(-dt / this._options.peakDecayTime);
+                this._peakVisualDb += (dbMin - this._peakVisualDb) * factor;
+
+                if (this._peakVisualDb <= dbMin + 0.05) {
+                    // Decay complete — reset
+                    this._peakDb        = dbMin;
+                    this._peakVisualDb  = dbMin;
+                    this._peakDecaying  = false;
+                    this._peakHoldUntil = 0;
+                }
+            } else {
+                // Fast attack toward _peakDb
+                const factor = 1 - Math.exp(-dt / this._options.peakAttackTime);
+                this._peakVisualDb += (this._peakDb - this._peakVisualDb) * factor;
+            }
+
+            this._updatePeakNeedle(this._peakVisualDb);
+        }
+
         this._rafId = requestAnimationFrame(ts => this._animate(ts));
     }
 
@@ -543,15 +815,33 @@ class VUMeter {
 
         this._counterweight.setAttribute('cx', tail.x.toFixed(2));
         this._counterweight.setAttribute('cy', tail.y.toFixed(2));
-        // Rotate counterweight ellipse to stay perpendicular to needle
         this._counterweight.setAttribute(
             'transform',
             `rotate(${angleDeg.toFixed(2)}, ${tail.x.toFixed(2)}, ${tail.y.toFixed(2)})`
         );
     }
 
+    _updatePeakNeedle(db) {
+        const angleDeg = this._dbToAngleDeg(db);
+        const tip      = this._angleToXY(angleDeg, VUMeter.TIP_LEN);
+        const tailDeg  = angleDeg + 180;
+        const tail     = this._angleToXY(tailDeg, VUMeter.TAIL_LEN);
+
+        this._peakNeedle.setAttribute('x1', tail.x.toFixed(2));
+        this._peakNeedle.setAttribute('y1', tail.y.toFixed(2));
+        this._peakNeedle.setAttribute('x2', tip.x.toFixed(2));
+        this._peakNeedle.setAttribute('y2', tip.y.toFixed(2));
+
+        this._peakCounterweight.setAttribute('cx', tail.x.toFixed(2));
+        this._peakCounterweight.setAttribute('cy', tail.y.toFixed(2));
+        this._peakCounterweight.setAttribute(
+            'transform',
+            `rotate(${angleDeg.toFixed(2)}, ${tail.x.toFixed(2)}, ${tail.y.toFixed(2)})`
+        );
+    }
+
     _updateClipState(db) {
-        const clipping = db > 0;
+        const clipping = db > this._options.clipThreshold;
 
         if (clipping === this._clipping) return;
         this._clipping = clipping;
@@ -573,11 +863,7 @@ class VUMeter {
             }
         }
 
-        if (clipping && typeof this._options.onClip === 'function') {
-            this._options.onClip();
-        }
-        if (!clipping && typeof this._options.onClipRelease === 'function') {
-            this._options.onClipRelease();
-        }
+        if (clipping  && typeof this._options.onClip       === 'function') this._options.onClip();
+        if (!clipping && typeof this._options.onClipRelease === 'function') this._options.onClipRelease();
     }
 }

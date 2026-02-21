@@ -64,8 +64,18 @@ const meter = new VUMeter(containerElement, options);
 | `label` | string | `'VU'` | Large text on the meter face. Set to `''` to hide. |
 | `brand` | string | `'MODEL 300'` | Small secondary label beneath `label`. |
 | `showLight` | boolean | `true` | Show or hide the CLIP indicator jewel light. |
-| `onClip` | function | `null` | Callback fired when the needle crosses above 0 VU. |
-| `onClipRelease` | function | `null` | Callback fired when the needle falls back to or below 0 VU. |
+| `onClip` | function | `null` | Callback fired when the needle crosses the clip threshold. |
+| `onClipRelease` | function | `null` | Callback fired when the needle falls back to or below the clip threshold. |
+| `clipThreshold` | number | `0` | dB value above which the CLIP jewel lights and `onClip` fires. |
+| `autoRange` | boolean | `false` | Dynamically adapt `dbMin`/`dbMax` from incoming data. Expands immediately on new peaks; contracts at ≤1 dB/s when signal quiets. |
+| `autoRangeWindow` | number | `30` | Seconds of sample history used to compute the observed signal range. |
+| `autoRangeMargin` | number | `2` | dB of padding added beyond the observed min/max edges. |
+| `showPeak` | boolean | `false` | Show a blue secondary needle that holds at the peak level, then decays. |
+| `peakColor` | string | `'#5599ff'` | Stroke/fill color of the peak hold needle. |
+| `peakAttackTime` | number | `50` | Milliseconds for the peak needle to rise to a new high. |
+| `peakHoldTime` | number | `2000` | Milliseconds the peak needle holds at its highest value before decaying. |
+| `peakDecayTime` | number | `1500` | Milliseconds for the peak needle to fall full-scale after the hold expires. |
+| `scalePreset` | string | `null` | `'smeter'` renders S1–S9, +10, +20, +40, +60 dB labels for ham radio use. |
 
 ---
 
@@ -76,7 +86,9 @@ const meter = new VUMeter(containerElement, options);
 | `setValue(db)` | Feed a dB value. Primary input API. Applies `noiseFloor` remapping then ballistics. |
 | `setAmplitude(amp)` | Feed a linear amplitude (0.0–1.0). Converts via `20 * log10(amp)` and calls `setValue()`. |
 | `getValue()` | Returns the current displayed dB value after ballistics (not the raw target). |
-| `setOptions(opts)` | Merge new options into the instance at any time after construction. |
+| `setRange(min, max)` | Recalibrate `dbMin`/`dbMax` at runtime and rebuild the scale immediately. |
+| `resetRange()` | Clear auto-range sample history and restore the original constructor `dbMin`/`dbMax`. |
+| `setOptions(opts)` | Merge new options into the instance. Rebuilds the scale when `clipThreshold`, `scalePreset`, `label`, or `brand` change. |
 | `pause()` | Suspend the animation loop (`requestAnimationFrame`). Use when the meter is off-screen to save CPU. |
 | `resume()` | Resume the animation loop after `pause()`. |
 | `destroy()` | Stop animation, remove the SVG from the DOM, and detach all event listeners. |
@@ -199,6 +211,87 @@ The wrapper element also receives the CSS class `vu-meter--clipping` while clipp
 .vu-meter--clipping {
   outline: 2px solid red;
 }
+```
+
+---
+
+## S-meter (ham radio signal strength)
+
+The `'smeter'` preset replaces the standard VU scale with ITU S-unit labels (S1–S9, +10, +20, +40, +60 dB) suitable for SDR and amateur radio applications.
+
+```js
+const meter = new VUMeter(document.getElementById('sig-meter'), {
+    scalePreset:   'smeter',
+    dbMin:         -121,   // S1  (noise floor)
+    dbMax:         -13,    // S9 +60 dB
+    noiseFloor:    -121,   // direct dBm passthrough
+    clipThreshold: -53,    // S9 +20 dB — jewel lights above here
+    label:         'SIG',
+    brand:         '14.205 MHz',
+    showPeak:      true,
+});
+
+// Feed raw dBm values directly from ka9q-radio or similar:
+meter.setValue(-87);  // ≈ S7
+```
+
+S-unit reference (HF, 50 Ω, ITU):
+
+| Label | dBm  |
+|-------|------|
+| S1    | −121 |
+| S2    | −115 |
+| S3    | −109 |
+| S4    | −103 |
+| S5    | −97  |
+| S6    | −91  |
+| S7    | −85  |
+| S8    | −79  |
+| S9    | −73  |
+| S9+10 | −63  |
+| S9+20 | −53  |
+| S9+40 | −33  |
+| S9+60 | −13  |
+
+---
+
+## Peak Hold
+
+Enable a blue secondary needle that freezes at the highest recent value and then decays:
+
+```js
+const meter = new VUMeter(el, {
+    showPeak:      true,
+    peakColor:     '#5599ff',
+    peakHoldTime:  3000,   // hold for 3 seconds
+    peakDecayTime: 2000,   // then fall over 2 seconds
+});
+```
+
+---
+
+## Dynamic Range (auto-ranging)
+
+Feed signals of unknown range and let the meter adapt its scale:
+
+```js
+const meter = new VUMeter(el, {
+    autoRange:       true,
+    autoRangeWindow: 30,   // look at last 30 s of data
+    autoRangeMargin: 3,    // pad ±3 dB beyond observed edges
+});
+
+// Range expands immediately when a new extreme is seen;
+// contracts slowly (≤1 dB/s) when the signal quiets.
+
+// Reset to original dbMin/dbMax at any time:
+meter.resetRange();
+```
+
+You can also recalibrate manually at any time:
+
+```js
+meter.setRange(-60, 0);  // rebuilds the scale face immediately
 ```
 
 ---
