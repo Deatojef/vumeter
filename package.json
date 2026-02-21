@@ -1,0 +1,15 @@
+{
+  "name": "vumeter",
+  "version": "1.0.0",
+  "description": "Vintage analog VU meter rendered in SVG — vanilla JS, no dependencies",
+  "main": "src/vumeter.js",
+  "license": "GPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Deatojef/vumeter.git"
+  },
+  "keywords": ["vumeter", "vu-meter", "audio", "signal", "svg", "smeter", "ham-radio"],
+  "scripts": {
+    "minify": "terser src/vumeter.js -o src/vumeter.min.js --compress --mangle"
+  }
+}

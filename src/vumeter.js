@@ -3,6 +3,8 @@
  * Reusable vintage analog VU meter rendered in SVG.
  * GPL v3 — https://github.com/Deatojef/vumeter
  *
+ * @version 1.0.0
+ *
  * Usage:
  *   const meter = new VUMeter(document.getElementById('my-meter'), options);
  *   meter.setValue(-6);       // feed a dB value
@@ -13,6 +15,8 @@
 class VUMeter {
 
     // ─── Constants ──────────────────────────────────────────────────────────
+
+    static VERSION = '1.0.0';
 
     static DEFAULTS = {
         width:           300,
