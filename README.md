@@ -2,7 +2,7 @@
 
 A reusable vanilla JavaScript class that renders a vintage analog VU meter resembling old radio test equipment. Visualizes decibel levels for incoming audio or data with realistic needle ballistics.
 
-**[Live Demo](https://deatojef.github.io/vumeter/)** *(enable GitHub Pages to activate)*
+**[Live Demo](https://deatojef.github.io/vumeter/)**
 
 ---
 
