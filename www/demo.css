@@ -1,0 +1,158 @@
+/* demo.css — styles for the VUMeter demo page only */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background: #0f0f0f;
+    color: #cccccc;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 13px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px 60px;
+    gap: 36px;
+}
+
+h1 {
+    font-size: 15px;
+    font-weight: normal;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: #888;
+}
+
+/* Meter row */
+.meter-row {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.meter-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.meter-wrap .vu-meter {
+    width: 280px;
+}
+
+.meter-label {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #666;
+}
+
+/* Controls */
+.controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+    max-width: 560px;
+}
+
+.control-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.control-group label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #666;
+}
+
+.slider-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+}
+
+input[type="range"] {
+    flex: 1;
+    appearance: none;
+    height: 3px;
+    background: #333;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    background: #aaa;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: #aaa;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+}
+
+.db-readout {
+    font-size: 13px;
+    font-family: 'Courier New', Courier, monospace;
+    color: #aaa;
+    min-width: 70px;
+    text-align: right;
+}
+
+.btn-row {
+    display: flex;
+    gap: 12px;
+}
+
+button {
+    padding: 7px 18px;
+    background: #222;
+    color: #aaa;
+    border: 1px solid #444;
+    border-radius: 3px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+button:hover {
+    background: #2e2e2e;
+    color: #ddd;
+}
+
+button.active {
+    background: #3a1a00;
+    border-color: #cc4400;
+    color: #ff8844;
+}
+
+.hint {
+    font-size: 10px;
+    color: #444;
+    letter-spacing: 1px;
+    text-align: center;
+}

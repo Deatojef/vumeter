@@ -1,0 +1,20 @@
+/* VUMeter.css — scoped styles for the VUMeter component */
+
+.vu-meter {
+    display: inline-block;
+    position: relative;
+    line-height: 0;
+    font-size: 0;
+    transition: filter 0.1s ease;
+}
+
+.vu-meter svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Clipping state: subtle red glow on the housing */
+.vu-meter--clipping {
+    filter: drop-shadow(0 0 7px rgba(220, 40, 0, 0.55));
+}

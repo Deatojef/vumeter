@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VUMeter — Vintage Analog VU Meter</title>
+    <link rel="stylesheet" href="VUMeter.css">
+    <link rel="stylesheet" href="demo.css">
+</head>
+<body>
+
+    <h1>VU Meter</h1>
+
+    <!-- Three meter instances -->
+    <div class="meter-row">
+        <div class="meter-wrap">
+            <div id="meter-left"></div>
+            <span class="meter-label">Ch. L</span>
+        </div>
+        <div class="meter-wrap">
+            <div id="meter-right"></div>
+            <span class="meter-label">Ch. R</span>
+        </div>
+        <div class="meter-wrap">
+            <div id="meter-master"></div>
+            <span class="meter-label">Master</span>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+
+        <!-- Manual level slider -->
+        <div class="control-group" id="manual-group">
+            <label>Manual Level</label>
+            <div class="slider-row">
+                <span class="db-readout" style="min-width:40px; text-align:left;">−20</span>
+                <input type="range" id="db-slider" min="-20" max="3" step="0.1" value="-20">
+                <span class="db-readout" id="db-readout">−20.0 dB</span>
+            </div>
+        </div>
+
+        <!-- Mode buttons -->
+        <div class="btn-row">
+            <button id="btn-manual" class="active">Manual</button>
+            <button id="btn-sim">Simulated Audio</button>
+            <button id="btn-mic">Microphone</button>
+        </div>
+
+        <p class="hint" id="hint-text">Drag the slider to set the level on all three meters.</p>
+
+    </div>
+
+    <script src="VUMeter.js"></script>
+    <script>
+    (function () {
+
+        // ─── Create meter instances ──────────────────────────────────────────
+
+        const meterL = new VUMeter(document.getElementById('meter-left'), {
+            label: 'VU',
+            brand: 'CH. L',
+            showLight: true,
+        });
+
+        const meterR = new VUMeter(document.getElementById('meter-right'), {
+            label: 'VU',
+            brand: 'CH. R',
+            showLight: true,
+        });
+
+        const meterM = new VUMeter(document.getElementById('meter-master'), {
+            label: 'VU',
+            brand: 'MASTER',
+            showLight: true,
+            onClip: function () {
+                document.getElementById('hint-text').textContent = 'Clipping! Signal above 0 VU.';
+                document.getElementById('hint-text').style.color = '#cc4400';
+            },
+            onClipRelease: function () {
+                restoreHint();
+            },
+        });
+
+        const allMeters = [meterL, meterR, meterM];
+
+        // ─── Slider (manual mode) ────────────────────────────────────────────
+
+        const slider   = document.getElementById('db-slider');
+        const readout  = document.getElementById('db-readout');
+
+        function formatDb(v) {
+            const sign = v >= 0 ? '+' : '';
+            return sign + v.toFixed(1) + ' dB';
+        }
+
+        slider.addEventListener('input', function () {
+            const db = parseFloat(this.value);
+            readout.textContent = formatDb(db);
+            allMeters.forEach(m => m.setValue(db));
+        });
+
+        // ─── Mode management ─────────────────────────────────────────────────
+
+        let mode      = 'manual';   // 'manual' | 'sim' | 'mic'
+        let simTimer  = null;
+        let simLevel  = -12;
+        let audioCtx  = null;
+        let analyser  = null;
+        let micStream = null;
+        let micRafId  = null;
+
+        const btnManual = document.getElementById('btn-manual');
+        const btnSim    = document.getElementById('btn-sim');
+        const btnMic    = document.getElementById('btn-mic');
+        const hintEl    = document.getElementById('hint-text');
+        const manualGrp = document.getElementById('manual-group');
+
+        function setMode(newMode) {
+            // Tear down previous mode
+            if (mode === 'sim' && simTimer !== null) {
+                clearInterval(simTimer);
+                simTimer = null;
+            }
+            if (mode === 'mic') {
+                stopMic();
+            }
+
+            mode = newMode;
+
+            btnManual.classList.toggle('active', mode === 'manual');
+            btnSim.classList.toggle('active',    mode === 'sim');
+            btnMic.classList.toggle('active',    mode === 'mic');
+
+            manualGrp.style.opacity    = mode === 'manual' ? '1' : '0.35';
+            manualGrp.style.pointerEvents = mode === 'manual' ? 'auto' : 'none';
+
+            if (mode === 'manual') {
+                restoreHint();
+                allMeters.forEach(m => m.setValue(parseFloat(slider.value)));
+            } else if (mode === 'sim') {
+                hintEl.style.color = '#444';
+                hintEl.textContent = 'Simulating audio signal across three channels.';
+                simLevel = -12;
+                simTimer = setInterval(simulateAudio, 42); // ~24 Hz
+            } else if (mode === 'mic') {
+                hintEl.style.color = '#444';
+                hintEl.textContent = 'Requesting microphone access…';
+                startMic();
+            }
+        }
+
+        function restoreHint() {
+            hintEl.style.color = '#444';
+            hintEl.textContent = mode === 'manual'
+                ? 'Drag the slider to set the level on all three meters.'
+                : mode === 'sim'
+                ? 'Simulating audio signal across three channels.'
+                : 'Microphone active.';
+        }
+
+        btnManual.addEventListener('click', () => setMode('manual'));
+        btnSim.addEventListener('click',    () => setMode(mode === 'sim' ? 'manual' : 'sim'));
+        btnMic.addEventListener('click',    () => setMode(mode === 'mic' ? 'manual' : 'mic'));
+
+        // ─── Simulated audio ─────────────────────────────────────────────────
+
+        function simulateAudio() {
+            // Random walk with drift toward simLevel
+            simLevel += (Math.random() - 0.48) * 2.5;
+            simLevel += (-9 - simLevel) * 0.04;  // drift toward -9 dB
+            simLevel = Math.max(-20, Math.min(4, simLevel));
+
+            // Each channel gets slight independent variation
+            meterL.setValue(simLevel + (Math.random() - 0.5) * 2);
+            meterR.setValue(simLevel + (Math.random() - 0.5) * 2);
+            meterM.setValue(simLevel + (Math.random() - 0.5) * 0.8);
+        }
+
+        // ─── Microphone input ────────────────────────────────────────────────
+
+        function startMic() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                hintEl.textContent = 'Microphone API not available in this browser.';
+                setMode('manual');
+                return;
+            }
+
+            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+                .then(function (stream) {
+                    micStream = stream;
+                    audioCtx  = new (window.AudioContext || window.webkitAudioContext)();
+                    analyser  = audioCtx.createAnalyser();
+                    analyser.fftSize = 256;
+
+                    const source = audioCtx.createMediaStreamSource(stream);
+                    source.connect(analyser);
+
+                    hintEl.textContent = 'Microphone active. All three meters show the same input.';
+                    pollMic();
+                })
+                .catch(function (err) {
+                    hintEl.textContent = 'Microphone access denied: ' + err.message;
+                    setMode('manual');
+                });
+        }
+
+        function pollMic() {
+            if (mode !== 'mic') return;
+
+            const buf = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(buf);
+
+            // RMS amplitude
+            let sum = 0;
+            for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+            const rms = Math.sqrt(sum / buf.length);
+
+            allMeters.forEach(m => m.setAmplitude(rms));
+            micRafId = requestAnimationFrame(pollMic);
+        }
+
+        function stopMic() {
+            if (micRafId !== null) {
+                cancelAnimationFrame(micRafId);
+                micRafId = null;
+            }
+            if (micStream) {
+                micStream.getTracks().forEach(t => t.stop());
+                micStream = null;
+            }
+            if (audioCtx) {
+                audioCtx.close();
+                audioCtx = null;
+                analyser = null;
+            }
+        }
+
+    }());
+    </script>
+
+</body>
+</html>
